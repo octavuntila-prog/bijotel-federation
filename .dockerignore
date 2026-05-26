@@ -13,8 +13,6 @@ build/
 *.egg-info
 tests/
 docker-compose.yml
-Dockerfile
-README.md
 federation.db
 federation.db-*
 data/

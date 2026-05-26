@@ -77,6 +77,24 @@ docker compose up -d
 docker compose logs -f bijotel-federation
 ```
 
+### Publishing the image to ghcr.io
+
+The image is built and tagged at `ghcr.io/octavuntila-prog/bijotel-federation:0.1.0`
+but not yet pushed (waiting on the maintainer's `write:packages` OAuth
+grant). To push:
+
+```bash
+# 1. Grant write:packages scope (one-time, opens a browser).
+gh auth refresh -s write:packages -h github.com
+
+# 2. Login Docker to ghcr.io with the gh token.
+gh auth token | docker login ghcr.io -u octavuntila-prog --password-stdin
+
+# 3. Push both tags.
+docker push ghcr.io/octavuntila-prog/bijotel-federation:0.1.0
+docker push ghcr.io/octavuntila-prog/bijotel-federation:latest
+```
+
 ## Configuration
 
 All settings come from env vars (`.env` is also honoured):
