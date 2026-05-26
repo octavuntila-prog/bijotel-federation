@@ -1,0 +1,37 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+*.egg
+.eggs/
+dist/
+build/
+*.whl
+
+# Tests / coverage
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.mypy_cache/
+.ruff_cache/
+
+# Env / secrets — never commit these
+.env
+.env.*
+!.env.example
+*.pem
+fed-priv.pem
+fed-pub.pem
+
+# Runtime data
+federation.db
+federation.db-journal
+federation.db-wal
+federation.db-shm
+data/
+
+# Editor
+.vscode/
+.idea/
+*.swp

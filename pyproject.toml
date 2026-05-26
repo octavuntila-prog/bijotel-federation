@@ -1,0 +1,68 @@
+[project]
+name = "bijotel-federation"
+version = "0.1.0"
+description = "Reference federation service for the BIJOTEL cross-org chain federation protocol (v2.11.0)."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "Octavian Untilă" }]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: System Administrators",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Security",
+    "Topic :: System :: Logging",
+    "Topic :: System :: Monitoring",
+    "Framework :: FastAPI",
+]
+keywords = ["bijotel", "federation", "audit", "transparency", "ed25519", "rekor"]
+
+dependencies = [
+    # The federation service is a peer to bijotel — it consumes the
+    # shipped client+crypto surface so the protocol stays in lockstep.
+    "bijotel>=2.11.0",
+    "fastapi>=0.100",
+    "uvicorn[standard]>=0.20",
+    "pydantic>=2.0",
+    "pydantic-settings>=2.0",
+    "cryptography>=42.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "httpx>=0.27",
+    "ruff>=0.6.0",
+]
+
+[project.scripts]
+bijotel-federation = "bijotel_federation.main:cli"
+
+[project.urls]
+Source = "https://github.com/octavuntila-prog/bijotel-federation"
+Issues = "https://github.com/octavuntila-prog/bijotel-federation/issues"
+"BIJOTEL Client" = "https://github.com/octavuntila-prog/BIJOTEL"
+"Protocol Spec" = "https://github.com/octavuntila-prog/BIJOTEL/blob/main/docs/design/cross-org-federation.md"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/bijotel_federation"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "W"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"

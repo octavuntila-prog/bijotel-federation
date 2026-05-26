@@ -1,0 +1,28 @@
+services:
+  bijotel-federation:
+    build: .
+    image: bijotel-federation:0.1.0
+    container_name: bijotel-federation
+    restart: unless-stopped
+    ports:
+      - "8088:8088"
+    environment:
+      # Generate once with `bijotel keygen --out-priv fed-priv.pem --out-pub fed-pub.pem`
+      # and inject as Docker / k8s secrets.
+      BIJOTEL_FED_PRIVATE_KEY_PEM: "${BIJOTEL_FED_PRIVATE_KEY_PEM:?federation private key required}"
+      BIJOTEL_FED_PUBLIC_KEY_PEM: "${BIJOTEL_FED_PUBLIC_KEY_PEM:?federation public key required}"
+      BIJOTEL_FED_REKOR_URL: "${BIJOTEL_FED_REKOR_URL:-https://rekor.sigstore.dev}"
+      BIJOTEL_FED_MIN_PARTICIPANTS: "${BIJOTEL_FED_MIN_PARTICIPANTS:-2}"
+      BIJOTEL_FED_ANCHOR_INTERVAL_SECONDS: "${BIJOTEL_FED_ANCHOR_INTERVAL_SECONDS:-3600}"
+    volumes:
+      - ./data:/data
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request,sys;sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8088/status', timeout=3).status==200 else 1)"
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
