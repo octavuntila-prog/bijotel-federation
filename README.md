@@ -14,7 +14,7 @@ This is the **service** side. The matching **client** ships in the
 
 ## Status
 
-**Alpha, v0.1.0 (2026-05-26).** Working FastAPI service backed by
+**Alpha, v0.2.0 (2026-06-02).** Working FastAPI service backed by
 SQLite, implementing the seven endpoints in
 [`docs/design/cross-org-federation.md`](https://github.com/octavuntila-prog/BIJOTEL/blob/main/docs/design/cross-org-federation.md).
 Skeleton-quality:
@@ -22,13 +22,15 @@ Skeleton-quality:
 - ✓ Challenge-response Ed25519 registration
 - ✓ Bearer-token Ed25519 per-request auth
 - ✓ Cross-anchor builder (hash recomputable by any auditor)
-- ✓ End-to-end test against the BIJOTEL client (12 tests)
+- ✓ End-to-end test against the BIJOTEL client (18 tests)
 - ✓ Docker + docker-compose deploy
-- ✗ Rekor anchoring of cross-anchors — pending the BIJOTEL v2.9
-  Rekor compat-gap fix (sigstore-python wiring); structure is in
-  place, current behaviour is a no-op shim
+- ✓ **Rekor anchoring of cross-anchors** (v0.2.0) — each cross-anchor
+  hash is signed (ECDSA P-256) and published to Sigstore Rekor; the
+  returned logIndex is stored in the receipt and re-fetchable by any
+  auditor. Set `BIJOTEL_FED_REKOR_PRIVATE_KEY_PEM` to enable. Unblocked
+  by the BIJOTEL 2.13.2 Rekor compat-gap fix.
 - ✗ No federation has registered any external operators yet
-- ✗ No key-rotation flow (spec'd in protocol §11; arrives in v0.2)
+- ✗ No key-rotation flow (spec'd in protocol §11; planned)
 
 ## Protocol
 
@@ -51,14 +53,17 @@ Endpoints exposed by this service:
 ## Quickstart (development)
 
 ```bash
-# 1. Generate a federation keypair (uses the bijotel CLI).
-pip install "bijotel[api]>=2.11.0"
-bijotel keygen --out-priv fed-priv.pem --out-pub fed-pub.pem
+# 1. Generate the federation keys with the bijotel CLI: an Ed25519
+#    keypair (signs receipts) + an ECDSA P-256 keypair (signs Rekor anchors).
+pip install "bijotel[api]>=2.13.2"
+bijotel keygen --output-dir ./keys               # keys/bijotel_private.pem + bijotel_public.pem
+bijotel keygen --type ecdsa --output-dir ./keys  # keys/bijotel_ecdsa_private.pem + ..._public.pem
 
 # 2. Install + run the service.
 pip install -e ".[dev]"
-export BIJOTEL_FED_PRIVATE_KEY_PEM=$(cat fed-priv.pem)
-export BIJOTEL_FED_PUBLIC_KEY_PEM=$(cat fed-pub.pem)
+export BIJOTEL_FED_PRIVATE_KEY_PEM=$(cat keys/bijotel_private.pem)
+export BIJOTEL_FED_PUBLIC_KEY_PEM=$(cat keys/bijotel_public.pem)
+export BIJOTEL_FED_REKOR_PRIVATE_KEY_PEM=$(cat keys/bijotel_ecdsa_private.pem)  # enables Rekor
 bijotel-federation                # binds 0.0.0.0:8088
 
 # 3. From another terminal, talk to it via the BIJOTEL client.
@@ -105,6 +110,7 @@ All settings come from env vars (`.env` is also honoured):
 | `BIJOTEL_FED_PRIVATE_KEY_PEM` | — | inline Ed25519 private key PEM |
 | `BIJOTEL_FED_PUBLIC_KEY_PEM` | — | matching public key PEM |
 | `BIJOTEL_FED_REKOR_URL` | `https://rekor.sigstore.dev` | empty disables |
+| `BIJOTEL_FED_REKOR_PRIVATE_KEY_PEM` | — | ECDSA P-256 PEM that signs Rekor anchors (separate from the Ed25519 receipt key). Empty disables Rekor. |
 | `BIJOTEL_FED_ANCHOR_INTERVAL_SECONDS` | `3600` | cross-anchor cadence |
 | `BIJOTEL_FED_MIN_PARTICIPANTS` | `2` | minimum operators per anchor |
 | `BIJOTEL_FED_BIND_HOST` | `0.0.0.0` | uvicorn bind host |

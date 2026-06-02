@@ -16,6 +16,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
+import logging
 import secrets
 import time
 
@@ -23,6 +24,8 @@ from bijotel.crypto.ed25519 import sign as ed25519_sign
 
 from bijotel_federation import db
 from bijotel_federation.settings import Settings
+
+_LOG = logging.getLogger("bijotel_federation.anchors")
 
 
 def build_pending_cross_anchor(settings: Settings) -> dict[str, str] | None:
@@ -103,18 +106,88 @@ def _maybe_anchor_in_rekor(
 ) -> tuple[int | None, str | None]:
     """Upload the cross-anchor hash to Rekor for public timestamping.
 
-    Returns ``(log_index, url)`` or ``(None, None)`` if disabled or
-    upload failed (the federation keeps running — Rekor is a
-    convenience, not a hard requirement).
+    Returns ``(log_index, url)`` on success, or ``(None, None)`` when Rekor
+    is disabled (no ``rekor_url``), no ECDSA key is configured, or the upload
+    fails. Rekor is a convenience, not a hard requirement — the federation
+    keeps running and the cross-anchor stays locally + Ed25519 verifiable
+    either way.
+
+    Signs the cross-anchor hash with an **ECDSA P-256** key — Rekor's
+    canonical ``hashedrekord`` path. (Rekor verifies Ed25519 via Ed25519ph,
+    which Python's ``cryptography`` cannot emit; see ``bijotel.crypto
+    .ecdsa_p256``. This was the v2.9 compat-gap; fixed upstream in BIJOTEL
+    2.13.2, which is what unblocks this wiring.) The Ed25519 federation key
+    still signs the receipt the client verifies; this is a separate,
+    Rekor-only key (``BIJOTEL_FED_REKOR_PRIVATE_KEY_PEM``).
     """
     if not settings.rekor_url:
         return None, None
-    # NOTE (M2 honesty): the BIJOTEL Rekor library has a known
-    # signature-encoding gap against the live Rekor service at v2.9
-    # (see CHANGELOG). The skeleton therefore stores the *intent* to
-    # anchor and the hash; live upload arrives when sigstore-python is
-    # wired in. Until then this branch is a no-op shim.
-    return None, None
+    if not settings.rekor_private_key_pem:
+        _LOG.warning(
+            "rekor_url is set but BIJOTEL_FED_REKOR_PRIVATE_KEY_PEM is empty — "
+            "skipping Rekor anchoring (generate one: bijotel keygen --type ecdsa)"
+        )
+        return None, None
+
+    try:
+        log_index, url = _rekor_upload_hash(
+            rekor_url=settings.rekor_url,
+            ecdsa_private_pem=settings.rekor_private_key_pem.encode("ascii"),
+            digest_hex=cross_anchor_hash,
+        )
+        _LOG.info("rekor: cross-anchor anchored at logIndex=%s", log_index)
+        return log_index, url
+    except Exception as exc:  # best-effort: never let Rekor break anchoring
+        msg = str(exc)
+        # 409 = entry already exists. Rekor is idempotent on (hash, sig, key),
+        # so the hash IS anchored — treat as a non-fatal already-done.
+        if "HTTP 409" in msg or " 409:" in msg:
+            _LOG.info("rekor: cross-anchor already present (409) — treating as anchored")
+            return None, None
+        _LOG.warning(
+            "rekor anchoring failed (non-fatal: %s): %s", type(exc).__name__, msg
+        )
+        return None, None
+
+
+def _rekor_upload_hash(
+    *, rekor_url: str, ecdsa_private_pem: bytes, digest_hex: str
+) -> tuple[int, str]:
+    """Sign ``bytes.fromhex(digest_hex)`` with ECDSA P-256 and upload a
+    hashedrekord entry to Rekor. Returns ``(log_index, entry_url)``.
+
+    Mirrors ``bijotel.anchoring.rekor.anchor_chain_head`` but for an arbitrary
+    digest (the federation cross-anchor hash) instead of a chain-db head, so an
+    external auditor re-verifies with the identical ``SHA-256(digest)`` recipe.
+    """
+    from bijotel.anchoring.rekor import RekorClient
+    from bijotel.crypto.ecdsa_p256 import sign_digest
+    from cryptography.hazmat.primitives import serialization
+
+    data_bytes = bytes.fromhex(digest_hex)
+    data_hash = hashlib.sha256(data_bytes).hexdigest()
+    signature_b64 = base64.b64encode(
+        sign_digest(data_bytes, ecdsa_private_pem)
+    ).decode("ascii")
+
+    priv = serialization.load_pem_private_key(ecdsa_private_pem, password=None)
+    public_pem = priv.public_key().public_bytes(
+        encoding=serialization.Encoding.PEM,
+        format=serialization.PublicFormat.SubjectPublicKeyInfo,
+    )
+    public_pem_b64 = base64.b64encode(public_pem).decode("ascii")
+
+    resp = RekorClient(rekor_url).upload(
+        data_hash_hex=data_hash,
+        signature_b64=signature_b64,
+        public_key_pem_b64=public_pem_b64,
+    )
+    if not isinstance(resp, dict) or not resp:
+        raise RuntimeError(f"Rekor returned unexpected payload: {resp!r}")
+    _uuid, entry = next(iter(resp.items()))
+    log_index = int(entry.get("logIndex", -1))
+    entry_url = f"{rekor_url.rstrip('/')}/api/v1/log/entries?logIndex={log_index}"
+    return log_index, entry_url
 
 
 def _canonical_receipt_payload(

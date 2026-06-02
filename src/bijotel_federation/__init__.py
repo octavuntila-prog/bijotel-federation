@@ -9,8 +9,10 @@ in separate repos:
   * ``bijotel-federation`` — the federation operator's service. One
     deployment per federation; multiple federations can co-exist.
 
-Skeleton at v0.1.0. See ``docs/design/cross-org-federation.md`` in
-the BIJOTEL repo for the protocol spec.
+v0.2.0 — adds live Sigstore Rekor anchoring of cross-anchors (ECDSA
+P-256), unblocked by the BIJOTEL 2.13.2 Rekor compat-gap fix. See
+``docs/design/cross-org-federation.md`` in the BIJOTEL repo for the
+protocol spec.
 """
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"

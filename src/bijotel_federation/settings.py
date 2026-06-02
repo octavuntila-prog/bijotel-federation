@@ -10,6 +10,12 @@ Reads from ``.env`` or process env. Twelve-factor friendly:
   * ``BIJOTEL_FED_REKOR_URL`` — Rekor base URL. Default
     ``https://rekor.sigstore.dev``. Set empty string to disable
     Rekor anchoring (development / air-gapped mode).
+  * ``BIJOTEL_FED_REKOR_PRIVATE_KEY_PEM`` — **ECDSA P-256** private key
+    PEM (inline) used to sign cross-anchor hashes for Rekor. Separate
+    from the Ed25519 receipt-signing key above: Rekor verifies Ed25519
+    via Ed25519ph (which Python cannot emit), so anchoring uses ECDSA.
+    Empty disables Rekor anchoring even when ``rekor_url`` is set.
+    Generate with ``bijotel keygen --type ecdsa``.
   * ``BIJOTEL_FED_ANCHOR_INTERVAL_SECONDS`` — how often the cross-
     anchor builder runs. Default ``3600`` (1 hour).
   * ``BIJOTEL_FED_MIN_PARTICIPANTS`` — minimum operators in one
@@ -36,6 +42,7 @@ class Settings(BaseSettings):
     private_key_pem: str = ""
     public_key_pem: str = ""
     rekor_url: str = "https://rekor.sigstore.dev"
+    rekor_private_key_pem: str = ""
     anchor_interval_seconds: int = 3600
     min_participants: int = 2
     bind_host: str = "0.0.0.0"

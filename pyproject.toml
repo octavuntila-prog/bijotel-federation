@@ -1,6 +1,6 @@
 [project]
 name = "bijotel-federation"
-version = "0.1.0"
+version = "0.2.0"
 description = "Reference federation service for the BIJOTEL cross-org chain federation protocol (v2.11.0)."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -25,7 +25,9 @@ keywords = ["bijotel", "federation", "audit", "transparency", "ed25519", "rekor"
 dependencies = [
     # The federation service is a peer to bijotel — it consumes the
     # shipped client+crypto surface so the protocol stays in lockstep.
-    "bijotel>=2.11.0",
+    # >=2.13.2 required: live Rekor anchoring uses the ECDSA P-256
+    # hashedrekord path fixed in BIJOTEL 2.13.2 (the v2.9 compat-gap).
+    "bijotel>=2.13.2",
     "fastapi>=0.100",
     "uvicorn[standard]>=0.20",
     "pydantic>=2.0",

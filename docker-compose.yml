@@ -1,17 +1,20 @@
 services:
   bijotel-federation:
     build: .
-    image: bijotel-federation:0.1.0
+    image: bijotel-federation:0.2.0
     container_name: bijotel-federation
     restart: unless-stopped
     ports:
       - "8088:8088"
     environment:
-      # Generate once with `bijotel keygen --out-priv fed-priv.pem --out-pub fed-pub.pem`
-      # and inject as Docker / k8s secrets.
+      # Generate with `bijotel keygen --output-dir ./keys` (Ed25519, signs
+      # receipts) and `bijotel keygen --type ecdsa --output-dir ./keys`
+      # (ECDSA P-256, signs Rekor anchors). Inject PEM contents as secrets.
       BIJOTEL_FED_PRIVATE_KEY_PEM: "${BIJOTEL_FED_PRIVATE_KEY_PEM:?federation private key required}"
       BIJOTEL_FED_PUBLIC_KEY_PEM: "${BIJOTEL_FED_PUBLIC_KEY_PEM:?federation public key required}"
       BIJOTEL_FED_REKOR_URL: "${BIJOTEL_FED_REKOR_URL:-https://rekor.sigstore.dev}"
+      # ECDSA P-256 key for Rekor anchoring (empty → Rekor anchoring disabled).
+      BIJOTEL_FED_REKOR_PRIVATE_KEY_PEM: "${BIJOTEL_FED_REKOR_PRIVATE_KEY_PEM:-}"
       BIJOTEL_FED_MIN_PARTICIPANTS: "${BIJOTEL_FED_MIN_PARTICIPANTS:-2}"
       BIJOTEL_FED_ANCHOR_INTERVAL_SECONDS: "${BIJOTEL_FED_ANCHOR_INTERVAL_SECONDS:-3600}"
     volumes:

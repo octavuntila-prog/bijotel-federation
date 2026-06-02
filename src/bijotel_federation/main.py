@@ -1,12 +1,12 @@
 """FastAPI app exposing the seven federation endpoints.
 
-  * ``GET  /federation/register/challenge`` — issue a nonce
-  * ``POST /federation/register``           — finalise registration
-  * ``POST /federation/submit``             — accept signed export
-  * ``GET  /federation/status``             — public health
-  * ``GET  /federation/operator/{id}``      — operator history
-  * ``GET  /federation/anchor/{id}``        — fetch cross-anchor
-  * ``GET  /federation/verify/{id}``        — re-verify cross-anchor
+  * ``GET  /register/challenge`` — issue a nonce
+  * ``POST /register``           — finalise registration
+  * ``POST /submit``             — accept signed export
+  * ``GET  /status``             — public health
+  * ``GET  /operator/{id}``      — operator history
+  * ``GET  /anchor/{id}``        — fetch cross-anchor
+  * ``GET  /verify/{id}``        — re-verify cross-anchor
 
 Auth model:
 
