@@ -5,6 +5,36 @@ All notable changes to bijotel-federation will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] — 2026-06-08 — Security hardening from the BIJOTEL technical audit
+
+Remediation of the 2026-06-08 BIJOTEL technical audit. 23 tests pass; ruff
+clean. Live-deployed on the ARA federation host and verified end-to-end (two
+Ed25519-signed operator submits → cross-anchor #6 in Rekor → `/verify` valid).
+
+### Security
+
+- **`/submit` cryptographically verifies the operator's signed export (ISSUE-1).**
+  The service previously witnessed (and Rekor-anchored) any chain head an
+  authenticated caller submitted, never verifying it, and hardcoded
+  `continuity_verified=True`. It now runs `verify_export` against the operator's
+  REGISTERED Ed25519 key (auditor mode) and sets `verified`/`continuity_verified`
+  from the result — rejecting unverifiable or wrong-key exports (422). Operators
+  must sign the submitted export (`bijotel export --sign-key`).
+- **Submit bearer nonces are one-shot (ISSUE-2).** A server-side seen-nonce
+  store rejects a replayed token within the TTL window. (Full body+timestamp
+  binding needs the bijotel 2.16.0 client — tracked.)
+- **`/verify` checks the federation Ed25519 signature (ISSUE-9),** not just the
+  hash recompute — reusing the hardened client verifier bound to the federation
+  key, so an edited participant list fails even with a recomputed hash.
+- **`/_internal/build-anchor` requires an admin bearer token (ISSUE-10);** with
+  no `BIJOTEL_FED_ADMIN_TOKEN` set the endpoint is disabled (fail-closed).
+- **Submissions are bounded (ISSUE-17):** `max_entry_count` + `max_submission_bytes`
+  reject oversized bodies before verify/store.
+
+### Added
+
+- Settings: `BIJOTEL_FED_ADMIN_TOKEN`, `max_entry_count`, `max_submission_bytes`.
+
 ## [0.2.0] — 2026-06-02 — Live Rekor anchoring of cross-anchors
 
 ### Added
