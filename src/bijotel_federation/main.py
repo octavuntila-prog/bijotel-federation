@@ -23,12 +23,35 @@ from __future__ import annotations
 import hashlib
 import json
 import secrets
+import tempfile
+from pathlib import Path
 from typing import Annotated, Any
 
+from bijotel.federation import CrossAnchorReceipt, verify_cross_anchor_receipt
+from bijotel.processors.export import verify_export
 from fastapi import Body, FastAPI, Header, HTTPException, status
 
 from bijotel_federation import __version__, anchors, auth, db
 from bijotel_federation.settings import Settings, get_settings
+
+
+def _verify_submitted_export(
+    payload: dict[str, Any], operator_public_key_pem: str
+) -> tuple[bool, str | None]:
+    """Cryptographically verify a submitted ``bijotel-chain-v2`` export
+    against the operator's REGISTERED Ed25519 public key (auditor mode).
+
+    The ISSUE-1 fix: the federation only witnesses (and Rekor-anchors) chain
+    heads it has verified are authentically signed by the registering
+    operator — not whatever an authenticated caller pastes in. Returns
+    ``(ok, reason)``.
+    """
+    with tempfile.TemporaryDirectory() as d:
+        export_path = Path(d) / "export.json"
+        key_path = Path(d) / "operator.pem"
+        export_path.write_text(json.dumps(payload), encoding="utf-8")
+        key_path.write_text(operator_public_key_pem, encoding="utf-8")
+        return verify_export(str(export_path), public_key_path=str(key_path))
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -116,10 +139,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     ) -> dict[str, Any]:
         """Accept a ``bijotel-chain-v2`` signed export.
 
-        The Authorization header carries a self-signed bearer token —
-        ``operator_id.nonce.signature_b64`` — verified per request
-        against the registered Ed25519 key. No server-side nonce store
-        (the per-request nonce defeats replay between requests).
+        Auth: a self-signed bearer token ``operator_id.nonce.sig`` verified
+        against the registered Ed25519 key, with the nonce consumed one-shot
+        to blunt replay (ISSUE-2). The submitted export is then
+        cryptographically verified against the operator's registered key
+        before its head is witnessed (ISSUE-1); the body is bounded (ISSUE-17).
         """
         op_id, nonce, sig_b64 = auth.parse_bearer_token(authorization)
         operator = db.operator_get(settings.db_path, op_id)
@@ -137,35 +161,56 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="bearer token signature invalid",
             )
-
-        # Minimal envelope validation — full continuity check happens
-        # downstream (skeleton trusts the client's signed export
-        # because it's already Ed25519-signed; deeper schema lives in
-        # the production deployment).
-        entries = payload.get("entries", [])
-        if not isinstance(entries, list):
+        # ISSUE-2: one-shot nonce — reject a replayed bearer token.
+        if not auth.consume_submit_nonce(nonce):
             raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="entries[] required",
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="bearer token replay detected (nonce already used)",
             )
 
-        first_seq = entries[0].get("seq", 0) if entries else 0
-        last_seq = entries[-1].get("seq", 0) if entries else 0
-        chain_head_signature = (
-            entries[-1].get("hmac_hash", "0" * 64) if entries else "0" * 64
-        )
+        entries = payload.get("entries", [])
+        if not isinstance(entries, list) or not entries:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="entries[] required and must be non-empty",
+            )
+        # ISSUE-17: bound the work before verifying/storing.
+        if len(entries) > settings.max_entry_count:
+            raise HTTPException(
+                status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                detail=f"too many entries ({len(entries)} > {settings.max_entry_count})",
+            )
+        body_json = json.dumps(payload, separators=(",", ":"))
+        if len(body_json.encode("utf-8")) > settings.max_submission_bytes:
+            raise HTTPException(
+                status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                detail="submission body too large",
+            )
+
+        # ISSUE-1: verify the signed export against the operator's REGISTERED
+        # key before witnessing its head — never trust the submitter blindly.
+        ok, reason = _verify_submitted_export(payload, operator["public_key_pem"])
+        if not ok:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=f"export verification failed: {reason}",
+            )
+
+        first_seq = entries[0].get("seq", 0)
+        last_seq = entries[-1].get("seq", 0)
+        chain_head_signature = entries[-1].get("hmac_hash", "0" * 64)
         submission_id = "sub_" + secrets.token_hex(8)
 
         record = db.submission_create(
             settings.db_path,
             submission_id=submission_id,
             operator_id=op_id,
-            signed_export_json=json.dumps(payload, separators=(",", ":")),
+            signed_export_json=body_json,
             entry_count=len(entries),
             first_seq=first_seq,
             last_seq=last_seq,
             chain_head_signature=chain_head_signature,
-            continuity_verified=True,
+            continuity_verified=True,  # justified: export verified above
         )
 
         return {
@@ -225,20 +270,30 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if not record:
             raise HTTPException(status_code=404, detail="anchor not found")
 
-        # Re-verify locally by recomputing — same algorithm as the
-        # client, so a mismatch here would also fail the client's
-        # local check.
-        participants = sorted(
-            record["participating_operators"], key=lambda p: p["operator_id"]
+        # ISSUE-9: verify the federation's Ed25519 signature, not just the
+        # hash recompute. Reuse the hardened client verifier, bound to the
+        # federation's own public key — so an edited participant list (even
+        # with a recomputed hash) fails on the signature.
+        receipt = CrossAnchorReceipt(
+            anchor_id=record["anchor_id"],
+            cross_anchor_hash=record["cross_anchor_hash"],
+            participating_operators=record["participating_operators"],
+            anchored_at=record["anchored_at"],
+            rekor_log_index=record["rekor_log_index"],
+            rekor_url=record["rekor_url"],
+            federation_signature=record["federation_signature"],
+            federation_public_key_pem=settings.public_key_pem,
         )
-        blob = "".join(p["chain_signature"] for p in participants).encode("utf-8")
-        blob += record["anchored_at"].encode("utf-8")
-        recomputed = hashlib.sha256(blob).hexdigest()
+        result = verify_cross_anchor_receipt(
+            receipt,
+            federation_public_key_pem=settings.public_key_pem.encode("ascii"),
+        )
         return {
             "anchor_id": anchor_id,
-            "valid": recomputed == record["cross_anchor_hash"],
+            "valid": result["valid"],
             "cross_anchor_hash": record["cross_anchor_hash"],
-            "recomputed_hash": recomputed,
+            "checks": result["checks"],
+            "reason": result["reason"],
             "rekor_log_index": record["rekor_log_index"],
         }
 
@@ -247,8 +302,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # ------------------------------------------------------------------
 
     @app.post("/_internal/build-anchor")
-    def trigger_anchor_build() -> dict[str, Any]:
-        """Manual cross-anchor trigger — useful for test / cron."""
+    def trigger_anchor_build(
+        authorization: Annotated[str | None, Header()] = None,
+    ) -> dict[str, Any]:
+        """Manual cross-anchor trigger (cron). ISSUE-10: admin-token gated —
+        no longer an unauthenticated state-mutating endpoint."""
+        auth.require_admin(authorization, settings.admin_token)
         result = anchors.build_pending_cross_anchor(settings)
         return result or {"status": "no-op", "reason": "not enough participants"}
 

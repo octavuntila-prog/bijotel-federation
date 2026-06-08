@@ -47,6 +47,13 @@ class Settings(BaseSettings):
     min_participants: int = 2
     bind_host: str = "0.0.0.0"
     bind_port: int = 8088
+    # Admin bearer token for the maintenance trigger /_internal/build-anchor.
+    # Empty => the endpoint is DISABLED (fail-closed), not open. (audit ISSUE-10)
+    admin_token: str = ""
+    # Submission bounds — reject oversized bodies before storing/verifying them
+    # so one operator cannot exhaust memory/disk. (audit ISSUE-17)
+    max_entry_count: int = 10_000
+    max_submission_bytes: int = 5_000_000
 
 
 _settings: Settings | None = None

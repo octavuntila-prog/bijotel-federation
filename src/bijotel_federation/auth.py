@@ -62,6 +62,49 @@ def verify_signature(
     return ed25519_verify(message, sig, public_key_pem)
 
 
+# Submit bearer nonces seen recently → one-shot replay guard. The submit
+# token's nonce is client-generated and fresh per request, so consuming it
+# server-side rejects a captured token replayed within the TTL window. Full
+# replay immunity (sign over body + timestamp, reject stale tokens) needs a
+# client change — tracked for bijotel 2.16.0. (audit ISSUE-2)
+_SUBMIT_NONCES_SEEN: dict[str, float] = {}
+_SUBMIT_NONCE_TTL_SECONDS = 300
+
+
+def consume_submit_nonce(nonce: str) -> bool:
+    """True the first time a submit nonce is seen (records it); False on
+    replay within the TTL window."""
+    _gc_submit_nonces()
+    now = time.time()
+    if _SUBMIT_NONCES_SEEN.get(nonce, 0.0) > now:
+        return False
+    _SUBMIT_NONCES_SEEN[nonce] = now + _SUBMIT_NONCE_TTL_SECONDS
+    return True
+
+
+def _gc_submit_nonces() -> None:
+    now = time.time()
+    for n in [n for n, exp in _SUBMIT_NONCES_SEEN.items() if exp <= now]:
+        _SUBMIT_NONCES_SEEN.pop(n, None)
+
+
+def require_admin(authorization_header: str | None, admin_token: str) -> None:
+    """Gate an admin-only endpoint. Fail-closed: if no admin token is
+    configured the endpoint is DISABLED (503), never open. (audit ISSUE-10)"""
+    if not admin_token:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="admin endpoint disabled: no BIJOTEL_FED_ADMIN_TOKEN configured",
+        )
+    expected = f"Bearer {admin_token}"
+    supplied = authorization_header or ""
+    if not secrets.compare_digest(supplied, expected):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="admin authorization required",
+        )
+
+
 def parse_bearer_token(authorization_header: str | None) -> tuple[str, str, str]:
     """Parse ``Bearer <operator_id>.<nonce>.<signature_b64>``.
 

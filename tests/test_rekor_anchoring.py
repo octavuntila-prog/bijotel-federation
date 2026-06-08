@@ -62,24 +62,33 @@ def _rekor_settings(tmp_path: Path, *, rekor_url: str, with_ecdsa_key: bool = Tr
         rekor_private_key_pem=ec_priv.decode("ascii") if with_ecdsa_key else "",
         anchor_interval_seconds=60,
         min_participants=2,
+        admin_token="test-admin-token",  # ISSUE-10: build-anchor is gated
     )
 
 
-def _seed_two_submissions(client: TestClient) -> None:
+def _seed_two_submissions(client: TestClient, settings: Settings) -> None:
+    """Seed two pending submissions for the cross-anchor builder. These tests
+    exercise the BUILD + Rekor path, so submissions are written directly via
+    the DAO — sidestepping /submit's export verification (covered in
+    test_endpoints.py), which would otherwise require full signed exports."""
+    from bijotel_federation import db
+
     pa, ua = generate_keypair()
     pb, ub = generate_keypair()
     op_a = _register(client, pa, ua, "OrgA")
     op_b = _register(client, pb, ub, "OrgB")
-    client.post(
-        "/submit",
-        json={"entries": [{"seq": 1, "hmac_hash": "aa" * 32}]},
-        headers={"Authorization": _bearer(op_a, pa)},
-    )
-    client.post(
-        "/submit",
-        json={"entries": [{"seq": 1, "hmac_hash": "bb" * 32}]},
-        headers={"Authorization": _bearer(op_b, pb)},
-    )
+    for op_id, head in ((op_a, "aa" * 32), (op_b, "bb" * 32)):
+        db.submission_create(
+            settings.db_path,
+            submission_id="sub_" + secrets.token_hex(6),
+            operator_id=op_id,
+            signed_export_json="{}",
+            entry_count=1,
+            first_seq=1,
+            last_seq=1,
+            chain_head_signature=head,
+            continuity_verified=True,
+        )
 
 
 def test_cross_anchor_records_rekor_logindex(tmp_path: Path, monkeypatch) -> None:
@@ -102,9 +111,12 @@ def test_cross_anchor_records_rekor_logindex(tmp_path: Path, monkeypatch) -> Non
 
     settings = _rekor_settings(tmp_path, rekor_url="https://rekor.example")
     client = TestClient(create_app(settings))
-    _seed_two_submissions(client)
+    _seed_two_submissions(client, settings)
 
-    data = client.post("/_internal/build-anchor").json()
+    data = client.post(
+        "/_internal/build-anchor",
+        headers={"Authorization": "Bearer test-admin-token"},
+    ).json()
     assert int(data["participant_count"]) == 2
     assert data["rekor_log_index"] == "987654"
 
@@ -125,9 +137,12 @@ def test_rekor_skipped_without_ecdsa_key(tmp_path: Path) -> None:
         tmp_path, rekor_url="https://rekor.example", with_ecdsa_key=False
     )
     client = TestClient(create_app(settings))
-    _seed_two_submissions(client)
+    _seed_two_submissions(client, settings)
 
-    data = client.post("/_internal/build-anchor").json()
+    data = client.post(
+        "/_internal/build-anchor",
+        headers={"Authorization": "Bearer test-admin-token"},
+    ).json()
     assert int(data["participant_count"]) == 2
     assert data["rekor_log_index"] == ""  # no anchor recorded
     anchor = client.get(f"/anchor/{data['anchor_id']}").json()
@@ -145,9 +160,12 @@ def test_rekor_failure_is_non_fatal(tmp_path: Path, monkeypatch) -> None:
 
     settings = _rekor_settings(tmp_path, rekor_url="https://rekor.example")
     client = TestClient(create_app(settings))
-    _seed_two_submissions(client)
+    _seed_two_submissions(client, settings)
 
-    data = client.post("/_internal/build-anchor").json()
+    data = client.post(
+        "/_internal/build-anchor",
+        headers={"Authorization": "Bearer test-admin-token"},
+    ).json()
     assert int(data["participant_count"]) == 2  # anchor still built
     assert data["rekor_log_index"] == ""  # but no Rekor index
     # Server-side verify still passes (Ed25519 receipt is independent of Rekor).
@@ -162,9 +180,12 @@ def test_live_rekor_cross_anchor(tmp_path: Path) -> None:
     """LIVE: anchor a real cross-anchor in public Rekor; expect a real logIndex."""
     settings = _rekor_settings(tmp_path, rekor_url="https://rekor.sigstore.dev")
     client = TestClient(create_app(settings))
-    _seed_two_submissions(client)
+    _seed_two_submissions(client, settings)
 
-    data = client.post("/_internal/build-anchor").json()
+    data = client.post(
+        "/_internal/build-anchor",
+        headers={"Authorization": "Bearer test-admin-token"},
+    ).json()
     assert data["rekor_log_index"], "no logIndex returned from live Rekor"
     assert int(data["rekor_log_index"]) > 0
     anchor = client.get(f"/anchor/{data['anchor_id']}").json()

@@ -28,6 +28,7 @@ def settings(tmp_path: Path, federation_keys: tuple[bytes, bytes]) -> Settings:
         rekor_url="",  # skip Rekor in tests
         anchor_interval_seconds=60,
         min_participants=2,
+        admin_token="test-admin-token",  # ISSUE-10: build-anchor is gated
     )
 
 
