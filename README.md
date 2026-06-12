@@ -2,7 +2,7 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Status: Alpha](https://img.shields.io/badge/status-alpha-orange.svg)](#status)
-[![BIJOTEL Client](https://img.shields.io/badge/client-bijotel%E2%89%A52.11.0-blue.svg)](https://github.com/octavuntila-prog/BIJOTEL)
+[![BIJOTEL Client](https://img.shields.io/badge/client-bijotel%E2%89%A52.13.2-blue.svg)](https://github.com/octavuntila-prog/BIJOTEL)
 
 Reference federation service for the BIJOTEL chain-federation
 protocol — the Certificate-Transparency analogue for tamper-evident
@@ -14,15 +14,20 @@ This is the **service** side. The matching **client** ships in the
 
 ## Status
 
-**Alpha, v0.2.0 (2026-06-02).** Working FastAPI service backed by
+**Alpha, v0.3.0 (2026-06-08).** Working FastAPI service backed by
 SQLite, implementing the seven endpoints in
 [`docs/design/cross-org-federation.md`](https://github.com/octavuntila-prog/BIJOTEL/blob/main/docs/design/cross-org-federation.md).
-Skeleton-quality:
+Live-deployed on the ARA federation host:
 
 - ✓ Challenge-response Ed25519 registration
-- ✓ Bearer-token Ed25519 per-request auth
-- ✓ Cross-anchor builder (hash recomputable by any auditor)
-- ✓ End-to-end test against the BIJOTEL client (18 tests)
+- ✓ Bearer-token Ed25519 per-request auth (one-shot nonces since 0.3.0)
+- ✓ **`/submit` cryptographically verifies the operator's signed export**
+  (0.3.0, security hardening from the 2026-06-08 audit) — wrong-key,
+  unsigned, replayed, or oversized submissions are rejected; the
+  `/_internal/build-anchor` trigger is admin-token gated (fail-closed)
+- ✓ Cross-anchor builder (hash recomputable by any auditor; `/verify`
+  also checks the federation Ed25519 signature since 0.3.0)
+- ✓ End-to-end test against the BIJOTEL client (23 tests)
 - ✓ Docker + docker-compose deploy
 - ✓ **Rekor anchoring of cross-anchors** (v0.2.0) — each cross-anchor
   hash is signed (ECDSA P-256) and published to Sigstore Rekor; the
@@ -84,21 +89,12 @@ docker compose logs -f bijotel-federation
 
 ### Publishing the image to ghcr.io
 
-The image is built and tagged at `ghcr.io/octavuntila-prog/bijotel-federation:0.1.0`
-but not yet pushed (waiting on the maintainer's `write:packages` OAuth
-grant). To push:
-
-```bash
-# 1. Grant write:packages scope (one-time, opens a browser).
-gh auth refresh -s write:packages -h github.com
-
-# 2. Login Docker to ghcr.io with the gh token.
-gh auth token | docker login ghcr.io -u octavuntila-prog --password-stdin
-
-# 3. Push both tags.
-docker push ghcr.io/octavuntila-prog/bijotel-federation:0.1.0
-docker push ghcr.io/octavuntila-prog/bijotel-federation:latest
-```
+The image is published by the tag-triggered release workflow
+([`.github/workflows/release.yml`](.github/workflows/release.yml)):
+pushing a `vX.Y.Z` tag runs the test gate, then builds a **multi-arch
+(amd64 + arm64)** image and pushes `:X.Y.Z` + `:latest` to
+`ghcr.io/octavuntila-prog/bijotel-federation`. arm64 is required because
+the production host (ARA) is arm64. No manual `docker push` step exists.
 
 ## Configuration
 
@@ -186,7 +182,7 @@ the protocol assumes):
 
 ```bash
 pip install -e ".[dev]"
-pytest        # 12 tests
+pytest        # 23 tests
 ruff check .
 ```
 

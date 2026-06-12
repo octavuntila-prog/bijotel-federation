@@ -34,6 +34,12 @@ Ed25519-signed operator submits → cross-anchor #6 in Rekor → `/verify` valid
 ### Added
 
 - Settings: `BIJOTEL_FED_ADMIN_TOKEN`, `max_entry_count`, `max_submission_bytes`.
+- Tag-triggered release workflow (2026-06-12): test gate → **multi-arch
+  (amd64 + arm64)** image → ghcr, mirroring the BIJOTEL pipeline proven
+  end-to-end on v2.15.1. arm64 because the production host (ARA) is arm64.
+  The image now carries an `org.opencontainers.image.source` label so the
+  first Actions push auto-links the ghcr package to this repo (avoiding the
+  GITHUB_TOKEN `permission_denied: write_package` ACL trap BIJOTEL hit).
 
 ## [0.2.0] — 2026-06-02 — Live Rekor anchoring of cross-anchors
 

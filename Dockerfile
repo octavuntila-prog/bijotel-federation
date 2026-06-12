@@ -8,6 +8,12 @@ RUN pip install --no-cache-dir --upgrade pip build hatchling && \
 FROM python:3.12-slim
 WORKDIR /app
 
+# Auto-links the ghcr package to this repo on first push, keeping the
+# release workflow's GITHUB_TOKEN authorized (the ACL trap BIJOTEL hit).
+LABEL org.opencontainers.image.source="https://github.com/octavuntila-prog/bijotel-federation" \
+      org.opencontainers.image.description="Reference federation service for BIJOTEL tamper-evident LLM audit chains" \
+      org.opencontainers.image.licenses="MIT"
+
 # Non-root user for the service process.
 RUN groupadd -r fed && useradd -r -g fed fed
 
